@@ -14,9 +14,18 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
     Set rsSource = db.OpenRecordset(sourceTableName, dbOpenDynaset)
     Set rsDest = db.OpenRecordset(destTableName, dbOpenDynaset)
     
+    ' Determine the temporary folder path (subfolder "temp" in the Access DB directory)
+    Dim strFolderPath As String
+    strFolderPath = CurrentProject.Path & "\temp"
+    If Dir(strFolderPath, vbDirectory) = "" Then
+        MkDir strFolderPath
+    End If
+    
+    ' Loop through each record in the source table.
     Do While Not rsSource.EOF
         rsDest.AddNew
         
+        ' Loop through each field in the current record.
         For Each fldSource In rsSource.Fields
             ' Skip auto-number fields.
             If (fldSource.Attributes And dbAutoIncrField) = 0 Then
@@ -27,23 +36,28 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
                             Dim rsAttachSource As DAO.Recordset2
                             Dim rsAttachDest As DAO.Recordset2
                             Dim strTempFile As String
+                            Dim strFileName As String
                             
                             Set rsAttachSource = fldSource.Value
                             Set rsAttachDest = rsDest.Fields(fldSource.Name).Value
                             
+                            ' Loop through each attachment record.
                             Do While Not rsAttachSource.EOF
                                 rsAttachDest.AddNew
-                                ' Construct a temporary file path using the file name.
-                                strTempFile = Environ("Temp") & "\" & rsAttachSource.Fields("FileName").Value
-                                ' Save the attachment from the source record to a temp file.
+                                ' Extract just the file name from the full URL.
+                                strFileName = ExtractFileName(rsAttachSource.Fields("FileName").Value)
+                                ' Build the full temporary file path.
+                                strTempFile = strFolderPath & "\" & strFileName
+                                ' Save the attachment from the source record to the temp file.
                                 rsAttachSource.Fields("FileData").SaveToFile strTempFile
                                 ' Load the file into the destination attachment field.
                                 rsAttachDest.Fields("FileData").LoadFromFile strTempFile
                                 rsAttachDest.Update
-                                ' Remove the temporary file.
+                                ' Delete the temporary file.
                                 Kill strTempFile
                                 rsAttachSource.MoveNext
                             Loop
+                            
                             rsAttachSource.Close
                             rsAttachDest.Close
                         End If
@@ -73,4 +87,17 @@ Public Function FieldExists(rs As DAO.Recordset, fldName As String) As Boolean
     Exit Function
 ErrHandler:
     FieldExists = False
+End Function
+
+' Extracts just the file name from a full URL or path.
+' For example: "https://sharepoint-example.com/sites/site/Attachments/1/examplefile.pdf"
+' returns "examplefile.pdf".
+Public Function ExtractFileName(ByVal fullUrl As String) As String
+    Dim pos As Long
+    pos = InStrRev(fullUrl, "/")
+    If pos > 0 Then
+        ExtractFileName = Mid(fullUrl, pos + 1)
+    Else
+        ExtractFileName = fullUrl
+    End If
 End Function
