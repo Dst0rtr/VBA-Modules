@@ -23,14 +23,28 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
     
     ' Loop through each record in the source table.
     Do While Not rsSource.EOF
+        ' Start a new record in the destination table.
         rsDest.AddNew
         
-        ' Loop through each field in the current record.
+        ' First pass: Copy all non-attachment fields.
         For Each fldSource In rsSource.Fields
             ' Skip auto-number fields.
             If (fldSource.Attributes And dbAutoIncrField) = 0 Then
                 If FieldExists(rsDest, fldSource.Name) Then
-                    ' Handle attachment fields using SaveToFile and LoadFromFile.
+                    If fldSource.Type <> dbAttachment Then
+                        rsDest.Fields(fldSource.Name).Value = fldSource.Value
+                    End If
+                End If
+            End If
+        Next fldSource
+        
+        ' Commit the new record so that attachments can be added.
+        rsDest.Update
+        
+        ' Second pass: Process attachment fields.
+        For Each fldSource In rsSource.Fields
+            If (fldSource.Attributes And dbAutoIncrField) = 0 Then
+                If FieldExists(rsDest, fldSource.Name) Then
                     If fldSource.Type = dbAttachment Then
                         If Not IsNull(fldSource.Value) Then
                             Dim rsAttachSource As DAO.Recordset2
@@ -38,17 +52,18 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
                             Dim strTempFile As String
                             Dim strFileName As String
                             
+                            ' Open the attachment recordset for the source and destination fields.
                             Set rsAttachSource = fldSource.Value
                             Set rsAttachDest = rsDest.Fields(fldSource.Name).Value
                             
-                            ' Loop through each attachment record.
+                            ' Loop through each attachment.
                             Do While Not rsAttachSource.EOF
                                 rsAttachDest.AddNew
-                                ' Extract just the file name from the full URL.
+                                ' Extract the file name from the full SharePoint URL.
                                 strFileName = ExtractFileName(rsAttachSource.Fields("FileName").Value)
                                 ' Build the full temporary file path.
                                 strTempFile = strFolderPath & "\" & strFileName
-                                ' Save the attachment from the source record to the temp file.
+                                ' Save the attachment from the source to the temp file.
                                 rsAttachSource.Fields("FileData").SaveToFile strTempFile
                                 ' Load the file into the destination attachment field.
                                 rsAttachDest.Fields("FileData").LoadFromFile strTempFile
@@ -61,15 +76,11 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
                             rsAttachSource.Close
                             rsAttachDest.Close
                         End If
-                    Else
-                        ' For non-attachment fields, copy the value directly.
-                        rsDest.Fields(fldSource.Name).Value = fldSource.Value
                     End If
                 End If
             End If
         Next fldSource
         
-        rsDest.Update
         rsSource.MoveNext
     Loop
     
@@ -90,7 +101,8 @@ ErrHandler:
 End Function
 
 ' Extracts just the file name from a full URL or path.
-' For example: "https://sharepoint-example.com/sites/site/Attachments/1/examplefile.pdf"
+' For example, given:
+'   "https://sharepoint-example.com/sites/site-example/list/examplelist/Attachments/1/examplefile.pdf"
 ' returns "examplefile.pdf".
 Public Function ExtractFileName(ByVal fullUrl As String) As String
     Dim pos As Long
