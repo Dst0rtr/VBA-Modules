@@ -21,24 +21,35 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
         MkDir strFolderPath
     End If
     
-    ' Loop through each record in the source table.
     Do While Not rsSource.EOF
-        ' Start a new record in the destination table.
         rsDest.AddNew
         
-        ' First pass: Copy all non-attachment fields.
+        ' First pass: Copy non-attachment fields.
+        Dim destFld As DAO.Field
         For Each fldSource In rsSource.Fields
             ' Skip auto-number fields.
             If (fldSource.Attributes And dbAutoIncrField) = 0 Then
                 If FieldExists(rsDest, fldSource.Name) Then
+                    ' Only copy non-attachment fields.
                     If fldSource.Type <> dbAttachment Then
-                        rsDest.Fields(fldSource.Name).Value = fldSource.Value
+                        Set destFld = rsDest.Fields(fldSource.Name)
+                        ' If it is a Short Text field, check length.
+                        If fldSource.Type = dbText Then
+                            Dim sVal As String
+                            sVal = Nz(fldSource.Value, "")
+                            If Len(sVal) > destFld.Size Then
+                                sVal = Left(sVal, destFld.Size)
+                            End If
+                            destFld.Value = sVal
+                        Else
+                            destFld.Value = fldSource.Value
+                        End If
                     End If
                 End If
             End If
         Next fldSource
         
-        ' Commit the new record so that attachments can be added.
+        ' Commit the new record so attachments can be added.
         rsDest.Update
         
         ' Second pass: Process attachment fields.
@@ -52,14 +63,12 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
                             Dim strTempFile As String
                             Dim strFileName As String
                             
-                            ' Open the attachment recordset for the source and destination fields.
                             Set rsAttachSource = fldSource.Value
                             Set rsAttachDest = rsDest.Fields(fldSource.Name).Value
                             
-                            ' Loop through each attachment.
                             Do While Not rsAttachSource.EOF
                                 rsAttachDest.AddNew
-                                ' Extract the file name from the full SharePoint URL.
+                                ' Extract just the file name from the full SharePoint URL.
                                 strFileName = ExtractFileName(rsAttachSource.Fields("FileName").Value)
                                 ' Build the full temporary file path.
                                 strTempFile = strFolderPath & "\" & strFileName
