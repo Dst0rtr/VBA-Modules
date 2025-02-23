@@ -30,10 +30,8 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
             ' Skip auto-number fields.
             If (fldSource.Attributes And dbAutoIncrField) = 0 Then
                 If FieldExists(rsDest, fldSource.Name) Then
-                    ' Only copy non-attachment fields.
                     If fldSource.Type <> dbAttachment Then
                         Set destFld = rsDest.Fields(fldSource.Name)
-                        ' If it is a Short Text field, check length.
                         If fldSource.Type = dbText Then
                             Dim sVal As String
                             sVal = Nz(fldSource.Value, "")
@@ -51,6 +49,8 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
         
         ' Commit the new record so attachments can be added.
         rsDest.Update
+        ' Reposition the pointer to the newly added record.
+        rsDest.Bookmark = rsDest.LastModified
         
         ' Second pass: Process attachment fields.
         For Each fldSource In rsSource.Fields
