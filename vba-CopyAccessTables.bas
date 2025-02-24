@@ -26,29 +26,34 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
         
         ' First pass: Copy non-attachment fields.
         Dim destFld As DAO.Field
+        Dim sVal As String
         For Each fldSource In rsSource.Fields
             ' Skip auto-number fields.
             If (fldSource.Attributes And dbAutoIncrField) = 0 Then
                 If FieldExists(rsDest, fldSource.Name) Then
+                    ' Only process non-attachment fields.
                     If fldSource.Type <> dbAttachment Then
                         Set destFld = rsDest.Fields(fldSource.Name)
-                        ' For short text fields, truncate if needed.
-                        If fldSource.Type = dbText Then
-                            Dim sVal As String
-                            sVal = Nz(fldSource.Value, "")
-                            If Len(sVal) > destFld.Size Then
-                                sVal = Left(sVal, destFld.Size)
-                            End If
-                            destFld.Value = sVal
-                        Else
-                            destFld.Value = fldSource.Value
-                        End If
+                        Select Case fldSource.Type
+                            Case dbText
+                                ' For short text fields, truncate if needed.
+                                sVal = Nz(fldSource.Value, "")
+                                If Len(sVal) > destFld.Size Then
+                                    sVal = Left(sVal, destFld.Size)
+                                End If
+                                destFld.Value = sVal
+                            Case dbMemo
+                                ' For long text fields, simply assign the full value.
+                                destFld.Value = fldSource.Value
+                            Case Else
+                                destFld.Value = fldSource.Value
+                        End Select
                     End If
                 End If
             End If
         Next fldSource
         
-        ' Commit the new record so that attachments can be added.
+        ' Commit the new record so attachments can be added.
         rsDest.Update
         rsDest.Bookmark = rsDest.LastModified
         
@@ -71,7 +76,7 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
                             
                             Do While Not rsAttachSource.EOF
                                 rsAttachDest.AddNew
-                                ' Extract the file name from the full URL.
+                                ' Extract the file name from the full SharePoint URL.
                                 strFileName = ExtractFileName(rsAttachSource.Fields("FileName").Value)
                                 ' Build the full temporary file path.
                                 strTempFile = strFolderPath & "\" & strFileName
@@ -104,7 +109,7 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
     Set db = Nothing
 End Sub
 
-' Helper function to determine if a field exists in a recordset.
+' Helper function to check if a field exists in a recordset.
 Public Function FieldExists(rs As DAO.Recordset, fldName As String) As Boolean
     On Error GoTo ErrHandler
     Dim dummy As DAO.Field
