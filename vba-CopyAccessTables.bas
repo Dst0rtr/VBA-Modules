@@ -32,6 +32,7 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
                 If FieldExists(rsDest, fldSource.Name) Then
                     If fldSource.Type <> dbAttachment Then
                         Set destFld = rsDest.Fields(fldSource.Name)
+                        ' For short text fields, truncate if needed.
                         If fldSource.Type = dbText Then
                             Dim sVal As String
                             sVal = Nz(fldSource.Value, "")
@@ -47,9 +48,8 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
             End If
         Next fldSource
         
-        ' Commit the new record so attachments can be added.
+        ' Commit the new record so that attachments can be added.
         rsDest.Update
-        ' Reposition the pointer to the newly added record.
         rsDest.Bookmark = rsDest.LastModified
         
         ' Second pass: Process attachment fields.
@@ -58,6 +58,9 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
                 If FieldExists(rsDest, fldSource.Name) Then
                     If fldSource.Type = dbAttachment Then
                         If Not IsNull(fldSource.Value) Then
+                            ' Put the parent record in edit mode for attachment updates.
+                            rsDest.Edit
+                            
                             Dim rsAttachSource As DAO.Recordset2
                             Dim rsAttachDest As DAO.Recordset2
                             Dim strTempFile As String
@@ -68,13 +71,13 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
                             
                             Do While Not rsAttachSource.EOF
                                 rsAttachDest.AddNew
-                                ' Extract just the file name from the full SharePoint URL.
+                                ' Extract the file name from the full URL.
                                 strFileName = ExtractFileName(rsAttachSource.Fields("FileName").Value)
                                 ' Build the full temporary file path.
                                 strTempFile = strFolderPath & "\" & strFileName
-                                ' Save the attachment from the source to the temp file.
+                                ' Save the source attachment to the temporary file.
                                 rsAttachSource.Fields("FileData").SaveToFile strTempFile
-                                ' Load the file into the destination attachment field.
+                                ' Load the temporary file into the destination attachment.
                                 rsAttachDest.Fields("FileData").LoadFromFile strTempFile
                                 rsAttachDest.Update
                                 ' Delete the temporary file.
@@ -84,6 +87,9 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
                             
                             rsAttachSource.Close
                             rsAttachDest.Close
+                            
+                            ' Commit the attachment updates.
+                            rsDest.Update
                         End If
                     End If
                 End If
@@ -98,7 +104,7 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
     Set db = Nothing
 End Sub
 
-' Helper function to check if a field exists in a recordset.
+' Helper function to determine if a field exists in a recordset.
 Public Function FieldExists(rs As DAO.Recordset, fldName As String) As Boolean
     On Error GoTo ErrHandler
     Dim dummy As DAO.Field
