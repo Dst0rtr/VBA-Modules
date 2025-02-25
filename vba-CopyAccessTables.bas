@@ -1,10 +1,6 @@
 Option Compare Database
 Option Explicit
 
-' Copies records from a source table to a destination table.
-' Parameters:
-'   sourceTableName - The name of the source table (e.g., "tblA")
-'   destTableName   - The name of the destination table (e.g., "tblB")
 Public Sub CopyTableData(sourceTableName As String, destTableName As String)
     Dim db As DAO.Database
     Dim rsSource As DAO.Recordset, rsDest As DAO.Recordset
@@ -17,33 +13,29 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
     ' Determine the temporary folder path (subfolder "temp" in the Access DB directory)
     Dim strFolderPath As String
     strFolderPath = CurrentProject.Path & "\temp"
-    If Dir(strFolderPath, vbDirectory) = "" Then
-        MkDir strFolderPath
-    End If
+    If Dir(strFolderPath, vbDirectory) = "" Then MkDir strFolderPath
     
     Do While Not rsSource.EOF
         rsDest.AddNew
-        
-        ' First pass: Copy non-attachment fields.
         Dim destFld As DAO.Field
         Dim sVal As String
+        
+        ' First pass: Copy simple fields (skip attachments and multi-valued fields)
         For Each fldSource In rsSource.Fields
             ' Skip auto-number fields.
             If (fldSource.Attributes And dbAutoIncrField) = 0 Then
                 If FieldExists(rsDest, fldSource.Name) Then
-                    ' Only process non-attachment fields.
-                    If fldSource.Type <> dbAttachment Then
+                    ' Skip attachment fields and multi-valued fields (type 104)
+                    If fldSource.Type <> dbAttachment And fldSource.Type <> 104 Then
                         Set destFld = rsDest.Fields(fldSource.Name)
                         Select Case fldSource.Type
                             Case dbText
-                                ' For short text fields, truncate if needed.
                                 sVal = Nz(fldSource.Value, "")
                                 If Len(sVal) > destFld.Size Then
                                     sVal = Left(sVal, destFld.Size)
                                 End If
                                 destFld.Value = sVal
                             Case dbMemo
-                                ' For long text fields, simply assign the full value.
                                 destFld.Value = fldSource.Value
                             Case Else
                                 destFld.Value = fldSource.Value
@@ -53,47 +45,61 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
             End If
         Next fldSource
         
-        ' Commit the new record so attachments can be added.
+        ' Commit the main record so that attachments and multi-valued fields can be updated.
         rsDest.Update
         rsDest.Bookmark = rsDest.LastModified
         
-        ' Second pass: Process attachment fields.
+        ' Second pass: Process attachment and multi-valued fields.
         For Each fldSource In rsSource.Fields
             If (fldSource.Attributes And dbAutoIncrField) = 0 Then
                 If FieldExists(rsDest, fldSource.Name) Then
+                    ' Process attachments first
                     If fldSource.Type = dbAttachment Then
                         If Not IsNull(fldSource.Value) Then
-                            ' Put the parent record in edit mode for attachment updates.
                             rsDest.Edit
-                            
                             Dim rsAttachSource As DAO.Recordset2
                             Dim rsAttachDest As DAO.Recordset2
-                            Dim strTempFile As String
-                            Dim strFileName As String
+                            Dim strTempFile As String, strFileName As String
                             
                             Set rsAttachSource = fldSource.Value
                             Set rsAttachDest = rsDest.Fields(fldSource.Name).Value
                             
                             Do While Not rsAttachSource.EOF
                                 rsAttachDest.AddNew
-                                ' Extract the file name from the full SharePoint URL.
                                 strFileName = ExtractFileName(rsAttachSource.Fields("FileName").Value)
-                                ' Build the full temporary file path.
                                 strTempFile = strFolderPath & "\" & strFileName
-                                ' Save the source attachment to the temporary file.
                                 rsAttachSource.Fields("FileData").SaveToFile strTempFile
-                                ' Load the temporary file into the destination attachment.
                                 rsAttachDest.Fields("FileData").LoadFromFile strTempFile
                                 rsAttachDest.Update
-                                ' Delete the temporary file.
                                 Kill strTempFile
                                 rsAttachSource.MoveNext
                             Loop
                             
                             rsAttachSource.Close
                             rsAttachDest.Close
+                            rsDest.Update
+                        End If
+                        
+                    ' Process multi-valued fields (type 104)
+                    ElseIf fldSource.Type = 104 Then
+                        If Not IsNull(fldSource.Value) Then
+                            rsDest.Edit
+                            Dim rsMVSource As DAO.Recordset2
+                            Dim rsMVDest As DAO.Recordset2
                             
-                            ' Commit the attachment updates.
+                            Set rsMVSource = fldSource.Value
+                            Set rsMVDest = rsDest.Fields(fldSource.Name).Value
+                            
+                            Do While Not rsMVSource.EOF
+                                rsMVDest.AddNew
+                                ' Multi-valued fields typically use "Value" as the field name in the subrecordset.
+                                rsMVDest.Fields("Value").Value = rsMVSource.Fields("Value").Value
+                                rsMVDest.Update
+                                rsMVSource.MoveNext
+                            Loop
+                            
+                            rsMVSource.Close
+                            rsMVDest.Close
                             rsDest.Update
                         End If
                     End If
@@ -109,7 +115,7 @@ Public Sub CopyTableData(sourceTableName As String, destTableName As String)
     Set db = Nothing
 End Sub
 
-' Helper function to check if a field exists in a recordset.
+' Helper function to determine if a field exists in a recordset.
 Public Function FieldExists(rs As DAO.Recordset, fldName As String) As Boolean
     On Error GoTo ErrHandler
     Dim dummy As DAO.Field
@@ -122,7 +128,7 @@ End Function
 
 ' Extracts just the file name from a full URL or path.
 ' For example, given:
-'   "https://sharepoint-example.com/sites/site-example/list/examplelist/Attachments/1/examplefile.pdf"
+' "https://sharepoint-example.com/sites/site-example/list/examplelist/Attachments/1/examplefile.pdf"
 ' returns "examplefile.pdf".
 Public Function ExtractFileName(ByVal fullUrl As String) As String
     Dim pos As Long
